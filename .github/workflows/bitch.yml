@@ -1,0 +1,51 @@
+name: Cloud-Android-Phone-Access
+on: workflow_dispatch
+
+jobs:
+  android-box:
+    runs-on: ubuntu-22.04  # 👈 Crucial change: Using 22.04 for better driver support
+    steps:
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=github-android --reset
+
+      - name: Build and Load Android Drivers
+        run: |
+          # Install headers and build tools
+          sudo apt-get update
+          sudo apt-get install -y linux-headers-$(uname -r) build-essential git
+          
+          # Clone and build the 'missing' binder/ashmem drivers
+          git clone https://github.com/remote-android/redroid-modules.git
+          cd redroid-modules
+          make
+          sudo make install
+          
+          # Load the drivers
+          sudo modprobe ashmem_linux
+          sudo modprobe binder_linux devices="binder,hwbinder,vndbinder"
+
+      - name: Launch Android 11
+        run: |
+          sudo docker run -itd --rm --privileged \
+            --pull always \
+            -v ~/data:/data \
+            -p 5555:5555 \
+            -p 5900:5900 \
+            redroid/redroid:11.0.0-latest \
+            androidboot.redroid_width=720 \
+            androidboot.redroid_height=1280 \
+            androidboot.redroid_fps=30 \
+            redroid.vncserver=1
+
+      - name: Status Info
+        run: |
+          $tsIP = tailscale ip -4
+          echo "=========================================="
+          echo "ANDROID IS READY!"
+          echo "TAILSCALE IP: $tsIP"
+          echo "VNC PORT: 5900"
+          echo "=========================================="
+          while true; do sleep 60; done
+
