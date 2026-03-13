@@ -30,25 +30,20 @@ jobs:
           echo "PASSWORD: MySecurePass123!"
           echo "=========================================="
 
-      - name: Update Pastebin with IP
+      - name: Update Existing Pastebin Paste
         run: |
           $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
-          
-          # <<< Paste your dev and user key here >>>
+
+          # Hardcoded keys (convenience)
           $devKey = "lP4u4TdHKaCzkbti3W24GsjcrtA-mlFE"
           $userKey = "db35c75ac183e4571949aa47a8942956"
+          $pasteID = "s11PWyha"  # your existing paste ID
 
-          $body = @{
-            api_option = "paste"
-            api_dev_key = $devKey
-            api_user_key = $userKey
-            api_paste_code = $tsIP
-            api_paste_private = "1"
-            api_paste_name = "RDP_IP"
-            api_paste_expire_date = "N"
-          }
+          # Build proper URL-encoded form string for editing
+          $form = "api_dev_key=$devKey&api_user_key=$userKey&api_paste_key=$pasteID&api_option=edit&api_paste_code=$tsIP"
 
-          Invoke-RestMethod -Uri "https://pastebin.com/api/api_post.php" -Method Post -Body $body
+          # Update the paste
+          Invoke-RestMethod -Uri "https://pastebin.com/api/api_post.php" -Method Post -Body $form -ContentType "application/x-www-form-urlencoded"
 
       - name: Keep Runner Alive
         run: |
