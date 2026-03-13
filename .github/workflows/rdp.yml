@@ -1,0 +1,55 @@
+name: RDP
+on: workflow_dispatch
+
+jobs:
+  rdp:
+    runs-on: windows-latest
+    steps:
+      - name: Install Tailscale
+        run: |
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi -OutFile tailscale.msi
+          Start-Process msiexec.exe -ArgumentList "/i tailscale.msi /quiet /norestart" -Wait
+
+      - name: Connect Tailscale
+        run: |
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=github-desktop --unattended --reset
+
+      - name: Configure User
+        run: |
+          $Password = ConvertTo-SecureString "MySecurePass123!" -AsPlainText -Force
+          New-LocalUser -Name "RDPUser" -Password $Password -FullName "RDP User"
+          Add-LocalGroupMember -Group "Administrators" -Member "RDPUser"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDPUser"
+
+      - name: Ready to Connect
+        run: |
+          $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+          echo "=========================================="
+          echo "SUCCESS! CONNECT TO THIS IP: $tsIP"
+          echo "USERNAME: RDPUser"
+          echo "PASSWORD: MySecurePass123!"
+          echo "=========================================="
+
+      - name: Update Pastebin with IP
+        run: |
+          $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+          
+          # <<< Paste your dev and user key here >>>
+          $devKey = "lP4u4TdHKaCzkbti3W24GsjcrtA-mlFE"
+          $userKey = "db35c75ac183e4571949aa47a8942956"
+
+          $body = @{
+            api_option = "paste"
+            api_dev_key = $devKey
+            api_user_key = $userKey
+            api_paste_code = $tsIP
+            api_paste_private = "1"
+            api_paste_name = "RDP_IP"
+            api_paste_expire_date = "N"
+          }
+
+          Invoke-RestMethod -Uri "https://pastebin.com/api/api_post.php" -Method Post -Body $body
+
+      - name: Keep Runner Alive
+        run: |
+          while($true) { Start-Sleep -Seconds 60 }
