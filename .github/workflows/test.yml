@@ -1,0 +1,43 @@
+name: Windows-Desktop-RDP
+on: workflow_dispatch
+
+jobs:
+  summon-pc:
+    runs-on: windows-latest
+
+    steps:
+      - name: Install Tailscale
+        run: |
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi -OutFile tailscale.msi
+          Start-Process msiexec.exe -ArgumentList "/i tailscale.msi /quiet /norestart" -Wait
+
+      - name: Connect Tailscale
+        run: |
+          $user = "${{ github.actor }}"
+          $date = (Get-Date).ToString("yyyyMMMMdd").ToUpper()
+          $hostname = "$user-$date"
+
+          & "C:\Program Files\Tailscale\tailscale.exe" up `
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
+            --hostname=$hostname `
+            --unattended --reset
+
+      - name: Configure User
+        run: |
+          $Password = ConvertTo-SecureString "MySecurePass123!" -AsPlainText -Force
+          New-LocalUser -Name "RDPUser" -Password $Password -FullName "RDP User"
+          Add-LocalGroupMember -Group "Administrators" -Member "RDPUser"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDPUser"
+
+      - name: Ready to Connect
+        run: |
+          $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+
+          echo "=========================================="
+          echo "HOSTNAME: $hostname"
+          echo "SUCCESS! CONNECT TO THIS IP: $tsIP"
+          echo "USERNAME: RDPUser"
+          echo "PASSWORD: MySecurePass123!"
+          echo "=========================================="
+
+          while($true) { Start-Sleep -Seconds 60 }
