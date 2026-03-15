@@ -1,4 +1,4 @@
-name: Win11
+name: Win_11
 on: workflow_dispatch
 
 jobs:
