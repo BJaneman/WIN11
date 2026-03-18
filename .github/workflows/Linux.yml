@@ -1,0 +1,71 @@
+name: Ubuntu RDP (LXDE + Tailscale)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+    - name: Update system
+      run: |
+        sudo apt update && sudo apt upgrade -y
+
+    - name: Install LXDE & XRDP
+      run: |
+        sudo apt install -y lxde xrdp dbus-x11
+
+    - name: Configure LXDE session
+      run: |
+        echo "startlxde" > ~/.xsession
+        echo "startlxde" > ~/.xsessionrc
+
+    - name: Fix XRDP permissions
+      run: |
+        sudo adduser xrdp ssl-cert
+
+    - name: Configure XRDP startup & color depth
+      run: |
+        sudo bash -c 'cat > /etc/xrdp/startwm.sh <<EOF
+        #!/bin/sh
+        export DESKTOP_SESSION=LXDE
+        export XDG_SESSION_DESKTOP=LXDE
+        exec startlxde
+        EOF'
+        sudo chmod +x /etc/xrdp/startwm.sh
+
+        # Force 16-bit color depth
+        sudo sed -i "s/#max_bpp=32/max_bpp=16/" /etc/xrdp/xrdp.ini
+
+    - name: Set password for runner
+      run: |
+        echo "runner:123456" | sudo chpasswd
+
+    - name: Start XRDP
+      run: |
+        sudo systemctl enable xrdp
+        sudo systemctl restart xrdp
+
+    - name: Install Tailscale
+      run: |
+        curl -fsSL https://tailscale.com/install.sh | sh
+
+    - name: Start Tailscale
+      run: |
+        sudo tailscale up --authkey=tskey-auth-kimGNQPCkz11CNTRL-3fDxcDxBubijSqRCoUw4cidnqU7haxvY --hostname=github-lxde-rdp
+
+    - name: Show connection info
+      run: |
+        echo "Waiting for Tailscale to connect..."
+        sleep 5
+        echo "====== CONNECT USING RDP ======"
+        echo "Username: runner"
+        echo "Password: 123456"
+        tailscale ip -4 || ip a
+
+    - name: Keep session alive
+      run: |
+        echo "RDP is ready. Workflow will stay alive..."
+        sleep 21600
