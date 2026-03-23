@@ -1,4 +1,4 @@
-name: Win11-CloudDrive
+name: Win11Drive
 on: workflow_dispatch
 
 jobs:
@@ -11,62 +11,68 @@ jobs:
           Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi -OutFile tailscale.msi
           Start-Process msiexec.exe -ArgumentList "/i tailscale.msi /quiet /norestart" -Wait
 
-      - name: Enable RDP
+      - name: Install Rclone and WinFSP (Dependencies)
+        run: |
+          choco install rclone winfsp -y
+
+      - name: Enable Remote Desktop
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
 
-      - name: Install Rclone & WinFsp
-        run: |
-          choco install rclone winfsp -y
-
       - name: Connect Tailscale
         run: |
+          $user = "${{ github.actor }}"
+          $date = (Get-Date).ToString("yyyyMMdd").ToUpper()
+          $hostname = "$user-$date"
           $authKey = "tskey-auth-kimGNQPCkz11CNTRL-3fDxcDxBubijSqRCoUw4cidnqU7haxvY"
-          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$authKey --hostname="Win11-Cloud" --unattended --reset
 
-      - name: Create RDPUser (Force Password)
+          & "C:\Program Files\Tailscale\tailscale.exe" up `
+            --authkey=$authKey `
+            --hostname=$hostname `
+            --unattended --reset
+
+      - name: Configure User
         run: |
-          # 1. Create the user
           $Password = ConvertTo-SecureString "MySecurePass123!" -AsPlainText -Force
-          $newUser = New-LocalUser -Name "RDPUser" -Password $Password -FullName "Cloud User"
-          
-          # 2. Add to Admin and RDP Groups
+          $newUser = New-LocalUser -Name "RDPUser" -Password $Password -FullName "RDP User" -Description "User for RDP"
           Add-LocalGroupMember -Group "Administrators" -Member "RDPUser"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDPUser"
-          
-          # 3. FORCE PASSWORD (This fixes the 'Wrong Password' error)
-          net user RDPUser MySecurePass123! /active:yes
 
-      - name: Setup Public Desktop Folder
+      - name: Mount InfiniCloud WebDAV (Global Desktop)
         run: |
-          # Use Public Desktop so it shows up for everyone
-          $PublicPath = "C:\Users\Public\Desktop\InfiniCloud"
-          if (!(Test-Path $PublicPath)) { New-Item -ItemType Directory -Path $PublicPath -Force }
-          icacls $PublicPath /grant "Everyone:(OI)(CI)F" /T
+          # 1. Kill any existing instances
+          taskkill /IM rclone.exe /F /T | Out-Null
 
-      - name: Mount InfiniCLOUD
-        shell: pwsh
-        run: |
-          $user = "meownsoor"
+          # 2. Setup Variables
           $pass = "uwWfVg3HNyQ4NE5s"
+          $user = "meownsoor"
           $url = "https://otaru.infini-cloud.net/dav/"
+          $mountPoint = "C:\Users\Public\Desktop\InfiniCloud"
+          
+          # Create the folder on the Public Desktop so everyone sees it
+          New-Item -ItemType Directory -Force -Path $mountPoint
+          
+          # Obscure password for rclone
           $obscured = rclone obscure $pass
-          
-          New-Item -ItemType Directory -Force -Path "D:\rcache"
-          $MountPath = "C:\Users\Public\Desktop\InfiniCloud"
-          
-          Start-Process rclone -ArgumentList "mount :webdav: `"$MountPath`" --webdav-url $url --webdav-user $user --webdav-pass $obscured --vfs-cache-mode full --vfs-cache-max-size 20G --cache-dir D:\rcache" -WindowStyle Hidden
-          
-          Start-Sleep -Seconds 20
 
-      - name: Final Connection Info
+          # 3. Start the Mount in the background
+          # Note: We use --vfs-cache-mode full to ensure Windows Explorer handles it like a real drive
+          Start-Process rclone -ArgumentList "mount :webdav: `"$mountPoint`" --webdav-url $url --webdav-user $user --webdav-pass $obscured --vfs-cache-mode full --no-check-certificate" -WindowStyle Hidden
+          
+          # 4. Give it time to initialize
+          Start-Sleep -Seconds 10
+
+      - name: Ready to Connect
         run: |
           $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
           echo "=========================================="
-          echo "IP: $tsIP"
-          echo "USER: RDPUser"
-          echo "PASS: MySecurePass123!"
+          echo "SUCCESS! CONNECT TO THIS IP: $tsIP"
+          echo "USERNAME: RDPUser"
+          echo "PASSWORD: MySecurePass123!"
+          echo "INFINICLOUD: Mounted on Public Desktop"
           echo "=========================================="
+
+          # Keeps the runner alive
           while($true) { Start-Sleep -Seconds 60 }
