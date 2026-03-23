@@ -11,56 +11,61 @@ jobs:
           Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi -OutFile tailscale.msi
           Start-Process msiexec.exe -ArgumentList "/i tailscale.msi /quiet /norestart" -Wait
 
-      - name: Enable Remote Desktop
+      - name: Enable RDP & WebDAV Service
         run: |
+          # Enable RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+          
+          # Start WebClient (Crucial for WebDAV)
+          Set-Service -Name WebClient -StartupType Automatic
+          Start-Service WebClient
 
       - name: Install Rclone & WinFsp
         run: |
-          # WinFsp is required for the OS to see the cloud mount as a drive
-          choco install winfsp rclone -y
+          choco install rclone winfsp -y
 
       - name: Connect Tailscale
         run: |
           $user = "${{ github.actor }}"
           $date = (Get-Date).ToString("yyyyMMdd").ToUpper()
           $hostname = "$user-$date"
+          # YOUR TAILSCALE KEY
           $authKey = "tskey-auth-kimGNQPCkz11CNTRL-3fDxcDxBubijSqRCoUw4cidnqU7haxvY"
+          
           & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$authKey --hostname=$hostname --unattended --reset
 
-      - name: Configure User
+      - name: Configure User & Desktop Folder
         run: |
+          # Create the RDP User
           $Password = ConvertTo-SecureString "MySecurePass123!" -AsPlainText -Force
           $newUser = New-LocalUser -Name "RDPUser" -Password $Password -FullName "RDP User" -Description "User for RDP"
           Add-LocalGroupMember -Group "Administrators" -Member "RDPUser"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDPUser"
+          
+          # Create the mount folder on the RDPUser's Desktop
+          $CloudPath = "C:\Users\RDPUser\Desktop\InfiniCloud"
+          if (!(Test-Path $CloudPath)) { New-Item -ItemType Directory -Path $CloudPath -Force }
 
-      - name: Mount InfiniCLOUD Drive
+      - name: Mount InfiniCLOUD (Direct Method)
         shell: pwsh
         run: |
-          $ConfigPath = "$env:USERPROFILE\.config\rclone\rclone.conf"
-          if (!(Test-Path (Split-Path $ConfigPath))) { New-Item -ItemType Directory -Force -Path (Split-Path $ConfigPath) }
-
-          # Obscuring the password so Rclone accepts it in the config file
+          # Your Credentials
+          $user = "meownsoor"
           $pass = "uwWfVg3HNyQ4NE5s"
+          $url = "https://otaru.infini-cloud.net/dav/"
           $obscured = rclone obscure $pass
-
-          Set-Content -Path $ConfigPath -Value @"
-          [MyCloud]
-          type = webdav
-          url = https://otaru.infini-cloud.net/dav/
-          vendor = other
-          user = meownsoor
-          pass = $obscured
-          "@
-
-          # Mount as S: drive. vfs-cache-mode full makes it behave like a real hard drive
-          Start-Process rclone -ArgumentList "mount MyCloud: S: --vfs-cache-mode full" -WindowStyle Hidden
           
-          # Small delay to let the mount initialize
-          Start-Sleep -Seconds 5
+          # Setup a large cache folder on D: drive
+          New-Item -ItemType Directory -Force -Path "D:\rcache"
+
+          # The Direct Mount Command
+          $DesktopFolder = "C:\Users\RDPUser\Desktop\InfiniCloud"
+          Start-Process rclone -ArgumentList "mount :webdav: `"$DesktopFolder`" --webdav-url $url --webdav-user $user --webdav-pass $obscured --vfs-cache-mode full --vfs-cache-max-size 20G --cache-dir D:\rcache" -WindowStyle Hidden
+          
+          # Wait to ensure it connects before the workflow finishes this step
+          Start-Sleep -Seconds 15
 
       - name: Ready to Connect
         run: |
@@ -69,6 +74,8 @@ jobs:
           echo "SUCCESS! CONNECT TO THIS IP: $tsIP"
           echo "USERNAME: RDPUser"
           echo "PASSWORD: MySecurePass123!"
-          echo "CLOUD DRIVE: S:\ (InfiniCLOUD)"
+          echo "FOLDER: Look for 'InfiniCloud' on the Desktop"
           echo "=========================================="
+          
+          # Keeps the runner alive for up to 6 hours
           while($true) { Start-Sleep -Seconds 60 }
