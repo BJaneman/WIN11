@@ -32,38 +32,41 @@ jobs:
           Add-LocalGroupMember -Group "Administrators" -Member "RDPUser"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDPUser"
 
-      - name: Install Rclone and WinFsp (Dependencies)
+      - name: Install Rclone and WinFsp
         run: |
-          # Install rclone and winfsp via choco (fastest for GH Actions)
           choco install rclone winfsp -y
 
-      - name: Mount InfiniCloud
+      - name: Mount InfiniCloud for RDPUser
         run: |
-          # 1. Kill the old "empty" mount
+          # 1. Kill any existing rclone processes
           taskkill /IM rclone.exe /F /T /ErrorAction SilentlyContinue
 
-          # 2. Re-mount using the credentials DIRECTLY in the command
+          # 2. Define the TARGET path specifically for RDPUser
+          $rdpDesktop = "C:\Users\RDPUser\Desktop\InfiniCloud"
+          
+          # 3. Create the directory manually (it might not exist yet for a new user)
+          if (!(Test-Path $rdpDesktop)) {
+              New-Item -Path $rdpDesktop -ItemType Directory -Force
+          }
+
+          # 4. Handle Credentials
           $pass = "uwWfVg3HNyQ4NE5s"
-          # Ensure rclone is in path for this session
           $env:Path += ";C:\Program Files\rclone"
           $obscured = rclone obscure $pass
 
-          # Create the directory first so the mount has a target
-          New-Item -ItemType Directory -Force -Path "$home\Desktop\InfiniCloud"
+          # 5. Start the Mount pointing to RDPUser's Desktop
+          Start-Process rclone -ArgumentList "mount :webdav: `"$rdpDesktop`" --webdav-url https://otaru.infini-cloud.net/dav/ --webdav-user meownsoor --webdav-pass $obscured --vfs-cache-mode full" -WindowStyle Hidden
 
-          Start-Process rclone -ArgumentList "mount :webdav: `"$home\Desktop\InfiniCloud`" --webdav-url https://otaru.infini-cloud.net/dav/ --webdav-user meownsoor --webdav-pass $obscured --vfs-cache-mode full" -WindowStyle Hidden
-
-          # 3. Wait for the handshake
-          Start-Sleep -Seconds 8
-
-          # 4. Open it and try creating a file
-          explorer "$home\Desktop\InfiniCloud"
+          # 6. Wait for the handshake to finalize
+          Start-Sleep -Seconds 10
 
       - name: Ready to Connect
         run: |
           $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
           echo "=========================================="
-          echo "SUCCESS! CONNECT TO THIS IP: $tsIP"
-          echo "INFINICLOUD MOUNTED AT: $home\Desktop\InfiniCloud"
+          echo "SUCCESS! CONNECT VIA RDP TO THIS IP: $tsIP"
+          echo "USER: RDPUser"
+          echo "PASS: MySecurePass123!"
+          echo "MOUNTED AT: C:\Users\RDPUser\Desktop\InfiniCloud"
           echo "=========================================="
           while($true) { Start-Sleep -Seconds 60 }
