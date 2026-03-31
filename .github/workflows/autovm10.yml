@@ -13,10 +13,8 @@ jobs:
 
       - name: Enable Remote Desktop
         run: |
-          # Enable RDP in Registry
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          # Allow unauthenticated RPC (helps with some RDP clients)
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
 
       - name: Connect Tailscale
@@ -24,8 +22,7 @@ jobs:
           $user = "${{ github.actor }}"
           $date = (Get-Date).ToString("yyyyMMdd").ToUpper()
           $hostname = "$user-$date"
-          
-          # HARDCODED KEY APPLIED BELOW
+
           $authKey = "tskey-auth-kimGNQPCkz11CNTRL-3fDxcDxBubijSqRCoUw4cidnqU7haxvY"
 
           & "C:\Program Files\Tailscale\tailscale.exe" up `
@@ -36,7 +33,7 @@ jobs:
       - name: Configure User
         run: |
           $Password = ConvertTo-SecureString "MySecurePass123!" -AsPlainText -Force
-          $newUser = New-LocalUser -Name "RDPUser" -Password $Password -FullName "RDP User" -Description "User for RDP"
+          New-LocalUser -Name "RDPUser" -Password $Password -FullName "RDP User" -Description "User for RDP"
           Add-LocalGroupMember -Group "Administrators" -Member "RDPUser"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDPUser"
 
@@ -59,7 +56,7 @@ jobs:
           Write-Host "===== DOWNLOADING VIRTUALBOX ====="
 
           $vbUrl = "https://download.virtualbox.org/virtualbox/7.0.14/VirtualBox-7.0.14-161095-Win.exe"
-          $vbInstaller = "VirtualBox.exe"
+          $vbInstaller = "C:\Users\Public\VirtualBox.exe"
 
           Invoke-WebRequest $vbUrl -OutFile $vbInstaller
           Write-Host "VirtualBox download complete"
@@ -68,39 +65,62 @@ jobs:
           Start-Process -FilePath $vbInstaller -ArgumentList "--silent --ignore-reboot" -Wait
           Write-Host "VirtualBox installed"
 
+          Write-Host "===== LOCATING VBoxManage ====="
+          $vb = (Get-Command VBoxManage -ErrorAction SilentlyContinue).Source
+          if (-not $vb) {
+            $vb = "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
+          }
+          Write-Host "Using VBoxManage at: $vb"
+
           Write-Host "===== DOWNLOADING VDI FILE ====="
 
           $vdiUrl = "https://archive.org/download/windows-8-startup/Windows%208%20Pro.vdi"
-          $vdiPath = "$env:USERPROFILE\Windows8Pro.vdi"
+          $vdiPath = "C:\Users\Public\Windows8Pro.vdi"
 
-          Invoke-WebRequest $vdiUrl -OutFile $vdiPath
+          Start-Job -ScriptBlock {
+              Invoke-WebRequest $using:vdiUrl -OutFile $using:vdiPath
+          }
+
+          while (!(Test-Path $vdiPath)) {
+              Start-Sleep 2
+          }
+
+          while ((Get-Job).State -eq "Running") {
+              $size = (Get-Item $vdiPath).Length / 1MB
+              Write-Host ("Downloaded: {0} MB" -f [math]::Round($size,2))
+              Start-Sleep 5
+          }
+
           Write-Host "VDI download complete: $vdiPath"
 
-          Write-Host "===== CREATING VM ====="
+          Write-Host "===== PREPARING VM DIRECTORY ====="
+          $vmBase = "C:\Users\Public\VirtualBoxVMs"
+          New-Item -ItemType Directory -Path $vmBase -Force | Out-Null
 
+          Write-Host "===== CREATING VM ====="
           $vmName = "Windows8VM"
 
-          & "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" createvm --name $vmName --register
+          & $vb createvm --name $vmName --basefolder $vmBase --register
           Write-Host "VM created"
 
-          & "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" modifyvm $vmName --memory 2048 --cpus 2 --nic1 nat
-          Write-Host "VM configured (RAM/CPU)"
+          & $vb modifyvm $vmName --memory 2048 --cpus 2 --nic1 nat
+          Write-Host "VM configured"
 
-          & "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" storagectl $vmName --name "SATA Controller" --add sata --controller IntelAhci
-          
-          & "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" storageattach $vmName `
+          & $vb storagectl $vmName --name "SATA Controller" --add sata --controller IntelAhci
+
+          & $vb storageattach $vmName `
             --storagectl "SATA Controller" `
             --port 0 --device 0 `
             --type hdd `
             --medium $vdiPath
 
-          Write-Host "VDI attached to VM"
+          Write-Host "VDI attached"
 
-          Write-Host "===== STARTING VM (HEADLESS) ====="
-
-          & "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" startvm $vmName --type headless
+          Write-Host "===== STARTING VM ====="
+          & $vb startvm $vmName --type headless
 
           Write-Host "VM start command issued"
 
-          # Keeps the runner alive
+          Write-Host "===== SYSTEM READY ====="
+
           while($true) { Start-Sleep -Seconds 60 }
